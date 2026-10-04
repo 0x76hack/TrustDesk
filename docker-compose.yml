@@ -1,0 +1,97 @@
+services:
+  postgres:
+    image: ankane/pgvector:latest
+    environment:
+      POSTGRES_USER: trustdesk
+      POSTGRES_PASSWORD: trustdesk_secret
+      POSTGRES_DB: trustdesk
+    ports:
+      - '5433:5432'
+    volumes:
+      - postgres_data:/var/lib/postgresql/data
+    healthcheck:
+      test: ['CMD-SHELL', 'pg_isready -U trustdesk']
+      interval: 5s
+      timeout: 5s
+      retries: 5
+
+  redis:
+    image: redis:7-alpine
+    ports:
+      - '6379:6379'
+    volumes:
+      - redis_data:/data
+    healthcheck:
+      test: ['CMD', 'redis-cli', 'ping']
+      interval: 5s
+      timeout: 5s
+      retries: 5
+
+  api:
+    build:
+      context: ./backend
+      dockerfile: Dockerfile
+    ports:
+      - '8000:8000'
+    volumes:
+      - ./backend:/app
+    environment:
+      - DATABASE_URL=postgresql+asyncpg://trustdesk:trustdesk_secret@postgres:5432/trustdesk
+      - REDIS_URL=redis://redis:6379/0
+      - TRUSTDESK_MASTER_KEY=td-master-key-9f8a2c1e4b7d6e5a8c0f3b2e1d4a7c9f
+      - TRUSTDESK_SECRETS_FILE=secrets.enc
+    env_file:
+      - path: ./backend/.env
+        required: false
+      - path: .env
+        required: false
+    depends_on:
+      postgres:
+        condition: service_healthy
+      redis:
+        condition: service_healthy
+    command: uvicorn app.main:app --host 0.0.0.0 --port 8000 --reload
+    restart: unless-stopped
+
+  worker:
+    build:
+      context: ./backend
+      dockerfile: Dockerfile
+    volumes:
+      - ./backend:/app
+    environment:
+      - DATABASE_URL=postgresql+asyncpg://trustdesk:trustdesk_secret@postgres:5432/trustdesk
+      - REDIS_URL=redis://redis:6379/0
+      - TRUSTDESK_MASTER_KEY=td-master-key-9f8a2c1e4b7d6e5a8c0f3b2e1d4a7c9f
+      - TRUSTDESK_SECRETS_FILE=secrets.enc
+    env_file:
+      - path: ./backend/.env
+        required: false
+      - path: .env
+        required: false
+    depends_on:
+      postgres:
+        condition: service_healthy
+      redis:
+        condition: service_healthy
+    command: arq app.workers.settings.WorkerSettings
+    restart: unless-stopped
+
+  frontend:
+    build:
+      context: ./frontend
+      dockerfile: Dockerfile
+    ports:
+      - '5173:5173'
+    volumes:
+      - ./frontend:/app
+      - /app/node_modules
+    environment:
+      - BACKEND_URL=http://api:8000
+    depends_on:
+      - api
+    restart: unless-stopped
+
+volumes:
+  postgres_data:
+  redis_data:
