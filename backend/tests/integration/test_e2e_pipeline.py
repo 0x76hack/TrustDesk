@@ -136,6 +136,44 @@ class TestEndToEndPipeline:
         assert "KB-POLICY-001" not in draft_res.citations
 
     @pytest.mark.asyncio
+    async def test_model_failure_never_fabricates_policy_citations(self):
+        ticket = Ticket(
+            id=str(uuid.uuid4()),
+            subject="What is the refund policy?",
+            category="refund",
+            priority="medium",
+            status="open",
+        )
+        provider = OpenRouterProvider(api_key="")
+        provider.complete = AsyncMock(side_effect=RuntimeError("provider unavailable"))
+        db = AsyncMock()
+
+        result = await generate_draft(
+            ticket=ticket,
+            customer=None,
+            order=None,
+            retrieval_results=[{
+                "doc_id": "KB-REAL-001",
+                "content": "Refunds are reviewed by a human agent.",
+                "relevance_score": 0.9,
+                "metadata": {},
+            }],
+            triage_result={"category": "refund"},
+            risk_result={"risk_level": "medium"},
+            provider=provider,
+            model_router=ModelRouter(),
+            db=db,
+            customer_message="What is the refund policy?",
+        )
+
+        assert result.status == "generation_failed"
+        assert result.citations == []
+        assert "[DOC " not in result.body
+        assert "KB-SHIPPING-001" not in result.body
+        assert "KB-POLICY-001" not in result.body
+        db.add.assert_called_once()
+
+    @pytest.mark.asyncio
     async def test_relevance_cutoff_blocks_irrelevant_query_and_returns_zero_citations(self):
         ticket = Ticket(
             id=str(uuid.uuid4()),
@@ -278,7 +316,19 @@ class TestEndToEndPipeline:
             if "toolaction" in s or "tool_actions" in s:
                 res.scalar_one_or_none.return_value = action
             elif "approval" in s:
-                res.scalar_one_or_none.return_value = None
+                if action.status == "approved":
+                    res.scalar_one_or_none.return_value = __import__(
+                        "app.models.approval", fromlist=["Approval"]
+                    ).Approval(
+                        id=str(uuid.uuid4()),
+                        action_id=action.id,
+                        approver_id="supervisor-independent-id",
+                        decision="approved",
+                        reason="test approval",
+                        decided_at=datetime.now(timezone.utc),
+                    )
+                else:
+                    res.scalar_one_or_none.return_value = None
             elif "ticket" in s:
                 res.scalar_one_or_none.return_value = ticket
             else:
