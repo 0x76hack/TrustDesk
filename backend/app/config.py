@@ -50,6 +50,7 @@ class Settings(BaseSettings):
 
     EMBEDDING_MODEL: str = "google/gemini-embedding-exp"
     EMBEDDING_DIM: int = 768
+    RETRIEVAL_RELEVANCE_CUTOFF: float = 0.55
 
     LOG_LEVEL: str = "INFO"
     ENVIRONMENT: str = "development"

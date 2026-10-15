@@ -9,7 +9,7 @@ from app.ai.embedding_utils import generate_dense_embedding, cosine_similarity
 from app.constants import RETRIEVAL_MAX_CHARS
 from app.config import settings
 
-RELEVANCE_CUTOFF = 0.35
+RELEVANCE_CUTOFF = 0.55
 
 def _compute_lexical_score(query: str, content: str) -> float:
     if not query or not content:
@@ -122,7 +122,7 @@ async def retrieve_context(
             scored_candidates.append((hybrid_score, chunk))
 
     scored_candidates = [
-        (score, chunk) for score, chunk in scored_candidates if score >= RELEVANCE_CUTOFF
+        (score, chunk) for score, chunk in scored_candidates if score >= float(getattr(settings, "RETRIEVAL_RELEVANCE_CUTOFF", RELEVANCE_CUTOFF))
     ]
     scored_candidates.sort(key=lambda x: x[0], reverse=True)
 

@@ -188,96 +188,31 @@ async def generate_draft(
         if len(content.strip().split()) < 15:
             raise ValueError("Response too brief")
     except Exception:
-        inquiry_lower = (customer_message or getattr(ticket, "subject", "") or "").lower()
-        primary_doc = retrieval_results[0]["doc_id"] if retrieval_results else "KB-SHIPPING-001"
-        order_rest = getattr(order, "restaurant", None) or "Partner Restaurant"
-        cust_name = getattr(customer, "name", "Customer") if customer else "Customer"
-        cat = getattr(triage_result, "category", None) or (triage_result.get("category", "general") if isinstance(triage_result, dict) else "general")
-        partner_name = getattr(order, "delivery_partner_name", None) or "our delivery partner"
-        dest_addr = getattr(order, "delivery_address", "") or getattr(customer, "address", "") or "your address"
+        # Never replace a failed model call with an invented policy answer.
+        # Keep the ticket in a human-reviewable state instead.
+        failure_content = (
+            "We could not generate a grounded response right now. No policy claims "
+            "or citations were generated. Please route this ticket to a human agent "
+            "for review."
+        )
+        draft_id = str(uuid.uuid4())
+        db.add(Draft(
+            id=draft_id,
+            ticket_id=ticket.id,
+            run_id=run_id,
+            body=failure_content,
+            status="generation_failed",
+        ))
+        await db.flush()
+        return DraftResult(
+            draft_id=draft_id,
+            body=failure_content,
+            citations=[],
+            status="generation_failed",
+            model_used=model_used,
+            token_usage={"prompt_tokens": 0, "completion_tokens": 0, "total_tokens": 0},
+        )
 
-        items_list = []
-        if order:
-            order_dict = getattr(order, "__dict__", {})
-            raw_items = order_dict.get("items")
-            if raw_items:
-                items_list = [f"{getattr(itm, 'quantity', 1)}x {getattr(itm, 'item_name', 'item')}" for itm in raw_items]
-        meal_summary = ", ".join(items_list) if items_list else "your ordered meal"
-
-        if any(w in inquiry_lower for w in ["membership", "pro tier", "pro", "stack", "benefit", "perk"]):
-            content = (
-                f"Hello {cust_name}!\n\n"
-                f"Thank you for reaching out regarding your Pro Tier membership. Here are the full details on your membership benefits and promotional stacking:\n\n"
-                f"1. Unlimited Free Delivery: As an active Pro Tier subscriber, you enjoy unlimited free delivery on all food orders above ₹149 from thousands of participating restaurants across your city.\n"
-                f"2. Extra Exclusive Savings: You receive up to 30% extra discount on top of regular menu prices, with zero surge fees and zero rain fees during peak delivery windows.\n"
-                f"3. Coupon Stacking: Yes, absolutely! Your Pro Tier free delivery perk combines seamlessly with restaurant promotional coupons, merchant vouchers, and partner discount codes. During checkout, simply select your promo code in the 'Coupons & Offers' section. The system will automatically apply both your free delivery benefit and your promotional discount code simultaneously.\n\n"
-                f"If you ever encounter an issue applying a specific coupon code, please verify that your cart meets the merchant's minimum subtotal requirement before taxes. Let us know if we can help you with anything else!\n\n"
-                f"[DOC {primary_doc}]"
-            )
-        elif any(w in inquiry_lower for w in ["rain", "monsoon", "weather", "flood", "waterlog", "flyover"]):
-            content = (
-                f"Hello {cust_name},\n\n"
-                f"We completely understand your concern regarding the delivery delay for your order from {order_rest} ({meal_summary}).\n\n"
-                f"Our live dispatch team checked the real-time telemetry: {partner_name} is currently navigating heavy monsoon rain and localized waterlogging along the route. For safety reasons, delivery partners ride cautiously under severe wet weather conditions.\n\n"
-                f"Please rest assured:\n"
-                f"- Your food is securely packed in an insulated thermal carrier, ensuring it remains warm, sealed, and protected from rain.\n"
-                f"- The rider is actively moving toward {dest_addr} and is estimated to arrive within the next 10 to 15 minutes.\n"
-                f"- You can track real-time GPS progress directly on your live delivery map.\n\n"
-                f"We sincerely apologize for the delay and deeply appreciate your patience and support for our delivery partners working through difficult weather!\n\n"
-                f"[DOC {primary_doc}]"
-            )
-        elif any(w in inquiry_lower for w in ["stationary", "dispatched", "track", "where", "status", "stuck", "location"]):
-            content = (
-                f"Hello {cust_name},\n\n"
-                f"Thank you for checking in regarding the delivery progress of your order from {order_rest}.\n\n"
-                f"We reviewed the live GPS status and dispatch logs for {partner_name}:\n"
-                f"- Current Status: The courier has collected {meal_summary} and is actively en route to {dest_addr}.\n"
-                f"- Location Telemetry: Due to high peak-hour corridor traffic and localized mobile network signal intervals, the GPS icon may appear temporarily stationary on the live map. However, our central telemetry confirms steady forward movement.\n"
-                f"- Food Protection: Your meal is stored in a temperature-controlled insulated container to preserve freshness.\n"
-                f"- Estimated Arrival: Expected within 10 to 15 minutes.\n\n"
-                f"Our automated tracking monitor remains active. If there is any unexpected holdup, our support team will reach out directly. Thank you for your patience!\n\n"
-                f"[DOC {primary_doc}]"
-            )
-        elif any(w in inquiry_lower for w in ["cancel", "cancellation"]):
-            content = (
-                f"Hello {cust_name},\n\n"
-                f"Here are the policy details regarding order cancellation for {order_rest}:\n\n"
-                f"- Cancellation Window: Under store cancellation policy, orders can be cancelled free of charge within 5 minutes of placement, provided the restaurant has not yet begun preparation.\n"
-                f"- Kitchen Preparation: Once the kitchen begins preparing fresh ingredients for {meal_summary}, cancellation is restricted to protect perishable merchant food inventory.\n"
-                f"- If you need to modify delivery notes or gate instructions, you can add them directly in your active order screen.\n\n"
-                f"[DOC {primary_doc}]"
-            )
-        elif cat == "shipping":
-            content = (
-                f"Hello {cust_name},\n\n"
-                f"Here is the operational delivery update for your order from {order_rest}:\n\n"
-                f"- Ordered Items: {meal_summary}\n"
-                f"- Assigned Courier: {partner_name}\n"
-                f"- Delivery Destination: {dest_addr}\n\n"
-                f"Under standard delivery guidelines, orders are targeted for delivery within 30 to 45 minutes of restaurant pickup. Our delivery partner is following the optimized route to your destination. Please keep your phone handy in case {partner_name} needs building access directions upon arrival.\n\n"
-                f"[DOC {primary_doc}]"
-            )
-        elif cat == "warranty":
-            content = (
-                f"Hello {cust_name},\n\n"
-                f"Thank you for contacting customer support regarding your order from {order_rest}.\n\n"
-                f"Under our Food Safety and Quality Guarantee, all partner restaurants must maintain rigorous packaging and hygiene standards. We have documented your report regarding {meal_summary} for immediate restaurant quality review and corrective measures. Our senior support team is on standby to ensure full resolution.\n\n"
-                f"[DOC {primary_doc}]"
-            )
-        elif cat == "refund":
-            content = (
-                f"Hello {cust_name},\n\n"
-                f"We sincerely apologize for the issue experienced with your order from {order_rest} ({meal_summary}).\n\n"
-                f"Under our Food Quality & Refund Policy, reports of damaged, missing, or compromised meals submitted within 2 hours of delivery are eligible for immediate resolution and full refund review. A customer support specialist is reviewing your case details and will ensure appropriate compensation is credited to your account.\n\n"
-                f"[DOC {primary_doc}]"
-            )
-        else:
-            content = (
-                f"Hello {cust_name},\n\n"
-                f"Thank you for reaching out to customer care regarding your order from {order_rest}.\n\n"
-                f"We have verified your account information and active order details for {meal_summary}. All operational guidelines and support protocols are active to assist you. If you require further assistance regarding delivery timings, menu items, or account benefits, please reply directly and our team will be delighted to help you.\n\n"
-                f"[DOC {primary_doc}]"
-            )
     val_res = validate_output(content)
     if not val_res["is_safe"]:
         return DraftResult(
