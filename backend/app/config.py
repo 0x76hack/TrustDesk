@@ -50,6 +50,7 @@ class Settings(BaseSettings):
 
     EMBEDDING_MODEL: str = "google/gemini-embedding-exp"
     EMBEDDING_DIM: int = 768
+    RETRIEVAL_RELEVANCE_CUTOFF: float = 0.55
 
     LOG_LEVEL: str = "INFO"
     ENVIRONMENT: str = "development"
@@ -98,5 +99,14 @@ class Settings(BaseSettings):
             if secret_val:
                 setattr(self, sensitive_field, secret_val)
 
-
-settings = Settings()
+        # Development placeholders are intentionally convenient for local setup,
+        # but must never be accepted in a production deployment.
+        if self.ENVIRONMENT.strip().lower() == "production":
+            for name in ("JWT_SECRET", "CSRF_SECRET_KEY"):
+                value = getattr(self, name) or ""
+                if len(value) < 32 or value.startswith("dev-insecure-") or "replace-in-production" in value:
+                    raise ValueError(
+                        f"{name} must be configured with a unique secret of at least 32 characters in production"
+                    )
+            if not self.ENFORCE_HTTPS:
+                raise ValueError("ENFORCE_HTTPS must be enabled in production")

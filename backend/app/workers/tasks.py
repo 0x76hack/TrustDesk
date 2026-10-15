@@ -169,7 +169,7 @@ async def _apply_triage_decisions(
                     run_id=run_id,
                     customer_message=first_msg,
                 )
-                if draft_res.get("body") and draft_res.get("status") != "blocked":
+                if draft_res.get("body") and draft_res.get("status") == "ready":
                     ai_body = draft_res["body"].strip()
                     ai_msg = Message(
                         id=str(uuid.uuid4()),

@@ -133,11 +133,31 @@ async def execute_action(action: ToolAction, db: AsyncSession) -> Dict[str, Any]
     sensitive_tools = {"start_refund_review", "create_replacement_order", "issue_refund", "cancel_order"}
     is_sensitive = (tool and tool.is_sensitive) or tool_name in sensitive_tools
 
-    if is_sensitive and action.status != "approved":
-        raise HTTPException(
-            status_code=status.HTTP_403_FORBIDDEN,
-            detail=f"Sensitive action '{tool_name}' requires supervisor approval before execution.",
+    if is_sensitive:
+        if action.status != "approved":
+            raise HTTPException(
+                status_code=status.HTTP_403_FORBIDDEN,
+                detail=f"Sensitive action '{tool_name}' requires supervisor approval before execution.",
+            )
+
+        # Status alone is mutable; require a persisted positive decision.
+        approval_res = await db.execute(
+            select(Approval).where(
+                Approval.action_id == action.id,
+                Approval.decision == "approved",
+            )
         )
+        approval = approval_res.scalar_one_or_none()
+        if approval is None:
+            raise HTTPException(
+                status_code=status.HTTP_403_FORBIDDEN,
+                detail=f"Sensitive action '{tool_name}' has no recorded approval decision.",
+            )
+        if action.proposed_by_id and approval.approver_id == action.proposed_by_id:
+            raise HTTPException(
+                status_code=status.HTTP_403_FORBIDDEN,
+                detail="Maker-checker policy violation: proposer cannot approve their own sensitive action.",
+            )
 
     if tool_name in ["issue_refund", "start_refund_review"]:
         from app.services.refund_service import issue_refund_coupon

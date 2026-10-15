@@ -4,6 +4,8 @@
 *.env.*.local
 backend/.env
 frontend/.env.local
+backend/secrets.enc
+secrets.enc
 
 # Python
 __pycache__/
