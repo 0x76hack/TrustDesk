@@ -117,8 +117,12 @@ def score_ticket_risk(
         if score < 35:
             score = 35
 
-    order_total = getattr(order, "total", 0.0) if order else 0.0
-    currency_symbol = "₹" if getattr(order, "currency", "INR") == "INR" else "$"
+    try:
+        order_total = float(getattr(order, "total", 0.0)) if order else 0.0
+    except (TypeError, ValueError):
+        order_total = 0.0
+    curr = getattr(order, "currency", "INR")
+    currency_symbol = "₹" if str(curr) == "INR" else "$"
     if cat in ["account_security", "refund", "billing"]:
         if order_total > 500:
             val = 35
@@ -143,7 +147,10 @@ def score_ticket_risk(
         score += val
         factors.append({"name": "evidence_sufficiency", "value": "zero_evidence", "weight": 20, "contribution": val})
 
-    confidence = getattr(triage_result, "confidence", None) or (triage_result.get("confidence", 1.0) if isinstance(triage_result, dict) else 1.0)
+    try:
+        confidence = float(getattr(triage_result, "confidence", None) or (triage_result.get("confidence", 1.0) if isinstance(triage_result, dict) else 1.0))
+    except (TypeError, ValueError):
+        confidence = 1.0
     if confidence < 0.6:
         val = 15
         score += val

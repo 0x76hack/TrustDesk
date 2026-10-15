@@ -1252,6 +1252,28 @@ async def issue_refund_for_ticket(
     db: AsyncSession = Depends(get_db),
     current_user: User = Depends(require_role(["agent", "senior_agent", "admin"])),
 ):
+    if current_user.role not in ["senior_agent", "admin"]:
+        from app.services.action_service import recommend_action
+        ticket = await get_ticket_or_404(ticket_id, db)
+        action = await recommend_action(
+            ticket=ticket,
+            triage_result={"category": "refund"},
+            risk_result={"risk_level": "medium"},
+            db=db,
+            proposed_by_id=current_user.id,
+            tool_name="issue_refund",
+            payload={"amount": req.amount, "reason": req.reason},
+        )
+        await db.commit()
+        return RefundResponse(
+            coupon_code="",
+            amount=req.amount,
+            ticket_id=ticket_id,
+            order_id=ticket.order_id,
+            status="pending_approval",
+            message="Refund proposal submitted. Sensitive action requires senior agent or supervisor approval.",
+        )
+
     from app.services.refund_service import issue_refund_coupon
 
     result, is_replay = await issue_refund_coupon(

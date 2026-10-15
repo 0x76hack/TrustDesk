@@ -21,6 +21,7 @@ from app.schemas.customer import CustomerCreate, CustomerResponse
 from app.schemas.order import OrderCreate, OrderResponse
 from app.schemas.kb import KBDocumentCreate, KBDocumentResponse
 from app.services.auth_service import hash_password
+from app.ai.embedding_utils import generate_dense_embedding
 
 router = APIRouter()
 
@@ -266,6 +267,7 @@ async def create_kb_document(
             doc_id=new_doc.doc_id,
             chunk_seq=seq,
             content=chunk_text,
+            embedding=generate_dense_embedding(chunk_text),
             metadata_json={
                 "title": new_doc.title,
                 "category": new_doc.category,

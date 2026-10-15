@@ -104,6 +104,14 @@ class OpenRouterProvider(ProviderAdapter):
                         pass
 
     async def embed(self, texts: List[str], model: str) -> EmbeddingResponse:
+        from .embedding_utils import generate_dense_embedding
+        if not self.api_key or not self.api_key.strip():
+            return EmbeddingResponse(
+                embeddings=[generate_dense_embedding(t) for t in texts],
+                model_used="dense-embedding-fallback",
+                token_usage={"prompt_tokens": len(" ".join(texts).split()), "total_tokens": len(" ".join(texts).split())}
+            )
+
         url = f"{self.base_url}/embeddings"
         payload = {
             "model": model,
@@ -112,19 +120,16 @@ class OpenRouterProvider(ProviderAdapter):
 
         try:
             response = await self._retry_request("POST", url, json=payload)
-        except OpenRouterError:
-            url = f"{self.base_url}/chat/completions"
+            data = response.json()
+            embeddings = [item['embedding'] for item in data['data']]
             return EmbeddingResponse(
-                embeddings=[[0.0] * 768 for _ in texts],
-                model_used=model,
-                token_usage={"prompt_tokens": 0, "total_tokens": 0}
+                embeddings=embeddings,
+                model_used=data['model'],
+                token_usage=data.get('usage', {})
             )
-
-        data = response.json()
-        embeddings = [item['embedding'] for item in data['data']]
-
-        return EmbeddingResponse(
-            embeddings=embeddings,
-            model_used=data['model'],
-            token_usage=data.get('usage', {})
-        )
+        except OpenRouterError:
+            return EmbeddingResponse(
+                embeddings=[generate_dense_embedding(t) for t in texts],
+                model_used="dense-embedding-fallback",
+                token_usage={"prompt_tokens": len(" ".join(texts).split()), "total_tokens": len(" ".join(texts).split())}
+            )

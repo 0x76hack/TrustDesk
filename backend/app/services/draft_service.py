@@ -107,13 +107,20 @@ async def extract_and_verify_citations(
     db: AsyncSession,
 ) -> Set[str]:
     raw_doc_ids = set(re.findall(r"\[DOC ([a-zA-Z0-9_-]+)\]", content))
-    if not raw_doc_ids and retrieval_results:
-        raw_doc_ids = {r["doc_id"] for r in retrieval_results[:2]}
-
-    if not raw_doc_ids:
+    if not raw_doc_ids or not retrieval_results:
         return set()
 
-    docs_check = await db.execute(select(KBDocument.doc_id).where(KBDocument.doc_id.in_(raw_doc_ids)))
+    allowed_doc_ids = {r["doc_id"] for r in retrieval_results if "doc_id" in r}
+    verified_candidate_ids = raw_doc_ids.intersection(allowed_doc_ids)
+    if not verified_candidate_ids:
+        return set()
+
+    docs_check = await db.execute(
+        select(KBDocument.doc_id).where(
+            KBDocument.doc_id.in_(verified_candidate_ids),
+            KBDocument.is_adversarial.is_(False),
+        )
+    )
     return set(docs_check.scalars().all())
 
 
@@ -132,19 +139,29 @@ async def generate_draft(
 ) -> DraftResult:
 
     if not retrieval_results:
-        default_docs_res = await db.execute(
-            select(KBDocument).where(KBDocument.is_adversarial.is_(False)).limit(3)
+        refusal_content = (
+            "Thank you for contacting customer support. We are unable to synthesize an automated policy-verified "
+            "response as there are no authoritative knowledge base documents matching your inquiry. Your ticket "
+            "has been routed to our senior operations team for review."
         )
-        default_docs = default_docs_res.scalars().all()
-        retrieval_results = [
-            {"doc_id": d.doc_id, "content": d.body[:500]}
-            for d in default_docs
-        ]
-        if not retrieval_results:
-            retrieval_results = [{
-                "doc_id": "KB-POLICY-001",
-                "content": "Standard customer assistance guidelines: ensure customer satisfaction, address delivery or quality defects promptly, and provide refunds when food arrives damaged or spilled.",
-            }]
+        draft_id = str(uuid.uuid4())
+        draft = Draft(
+            id=draft_id,
+            ticket_id=ticket.id,
+            run_id=run_id,
+            body=refusal_content,
+            status="insufficient_evidence",
+        )
+        db.add(draft)
+        await db.flush()
+        return DraftResult(
+            draft_id=draft_id,
+            body=refusal_content,
+            citations=[],
+            status="insufficient_evidence",
+            model_used="deterministic-grounding-gate",
+            token_usage={"prompt_tokens": 0, "completion_tokens": 0, "total_tokens": 0},
+        )
 
     sys_prompt, user_prompt = build_draft_prompts(
         ticket=ticket,
@@ -335,8 +352,8 @@ async def stream_draft(
         yield f'data: {json.dumps({"token": token})}\n\n'
 
     draft_id = str(uuid.uuid4())
-    doc_ids = list(set(re.findall(r"\[DOC ([a-zA-Z0-9_-]+)\]", full_content)))
-    if not doc_ids and retrieval_results:
-        doc_ids = [r["doc_id"] for r in retrieval_results[:2]]
+    raw_ids = set(re.findall(r"\[DOC ([a-zA-Z0-9_-]+)\]", full_content))
+    allowed_ids = {r["doc_id"] for r in retrieval_results if "doc_id" in r}
+    doc_ids = list(raw_ids.intersection(allowed_ids))
 
     yield f'data: {json.dumps({"done": True, "draft_id": draft_id, "citations": doc_ids})}\n\n'

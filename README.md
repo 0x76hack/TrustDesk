@@ -324,6 +324,27 @@ Interactive OpenAPI documentation is available at `http://localhost:8000/docs`.
 
 ---
 
+## Areas for Extension and Learner Improvement
+
+TrustDesk provides a production-grade baseline for safe, grounded customer operations with dense vector retrieval, guardrail fencing, and approval gating. Learners exploring or extending this architecture can build upon the system across several high-impact dimensions:
+
+1. **Dynamic Embedding Fine-Tuning & Cross-Encoder Re-Ranking**:
+   - While TrustDesk currently performs dense vector similarity search via PostgreSQL `pgvector` (`KBChunk.embedding <=> query_vector`) coupled with lexical scoring and a calibrated relevance cutoff (`0.35`), learners can implement a second-stage cross-encoder re-ranker (e.g. `bge-reranker-large` or Cohere Rerank). A cross-encoder joint-scores `(query, passage)` pairs, capturing subtle conversational nuances and complex grievance phrasing that dense retrieval alone might score borderline.
+
+2. **Temporal Policy Version Matching**:
+   - In production environments, corporate refund and cancellation terms evolve over time. Learners can extend `retrieval_service.py` to match the customer's historical order placed timestamp against `KBDocument.effective_at` and versioning intervals. This ensures that retrospective refund claims are adjudicated strictly against the exact policy terms in effect at the moment the transaction was booked, rather than subsequently modified terms.
+
+3. **Automated Confidence Calibration via Conformal Prediction**:
+   - The current triage and risk services score ticket urgency and categorize complaints using model confidence heuristics and weighted risk factors. Learners can apply conformal prediction algorithms to output mathematically bounded confidence intervals (e.g. 95% coverage guarantees), ensuring that automated resolutions are only triggered when the prediction set contains a singleton category with high statistical certainty.
+
+4. **Multi-Modal Damage & Defect Image Inspection**:
+   - Food delivery customer support often requires verifying physical food spillage, incorrect items, or carton tampering. Learners can integrate Vision Language Models (e.g. Gemini 1.5 Pro / Flash Vision) directly into the ticket ingestion pipeline to analyze uploaded customer photos against the restaurant's expected packaging standards, calculating tamper confidence scores before human or automated vouchers are granted.
+
+5. **Enterprise Cloud KMS & Secret Vault Backends**:
+   - TrustDesk's secrets management layer uses dynamic environment extraction and local encrypted keystores. For enterprise production deployments, learners can extend `manage_secrets.py` and `app/config.py` to integrate natively with hardware-backed Key Management Services (such as AWS KMS, HashiCorp Vault, or Google Cloud KMS) featuring automated cryptographic key rotation, fine-grained IAM resource policies, and immutable HSM access logs.
+
+---
+
 ## Related Documentation
 
 - [`ARCHITECTURE.md`](docs/ARCHITECTURE.md): Component topology, hybrid vector search, idempotency design, and concurrency controls.

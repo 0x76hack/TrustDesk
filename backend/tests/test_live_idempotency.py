@@ -8,26 +8,25 @@ from pathlib import Path
 from datetime import datetime, timezone
 from sqlalchemy import select
 
-for cand in [
-    "postgresql+asyncpg://trustdesk:trustdesk_secret@localhost:5433/trustdesk",
-    "postgresql+asyncpg://trustdesk:trustdesk_secret@postgres:5432/trustdesk",
-    "postgresql+asyncpg://trustdesk:trustdesk_secret@localhost:5432/trustdesk",
-]:
-    try:
-        m = re.search(r"@([^:]+):(\d+)", cand)
-        if m:
-            s = socket.create_connection((m.group(1), int(m.group(2))), timeout=1)
+if not os.getenv("DATABASE_URL"):
+    db_user = os.getenv("POSTGRES_USER", "trustdesk")
+    db_pass = os.getenv("POSTGRES_PASSWORD", "")
+    auth_part = f"{db_user}:{db_pass}@" if db_pass else f"{db_user}@"
+    db_name = os.getenv("POSTGRES_DB", "trustdesk")
+    for host, port in [("localhost", 5433), ("postgres", 5432), ("localhost", 5432)]:
+        try:
+            s = socket.create_connection((host, port), timeout=1)
             s.close()
-            os.environ["DATABASE_URL"] = cand
+            os.environ["DATABASE_URL"] = f"postgresql+asyncpg://{auth_part}{host}:{port}/{db_name}"
             break
-    except Exception:
-        pass
+        except Exception:
+            pass
 
 sys.path.insert(0, str(Path(__file__).resolve().parent.parent))
 
 from app.config import settings
-if "cand" in locals() and cand:
-    settings.DATABASE_URL = cand
+if os.getenv("DATABASE_URL"):
+    settings.DATABASE_URL = os.environ["DATABASE_URL"]
 
 from app import database
 from sqlalchemy.ext.asyncio import create_async_engine, async_sessionmaker, AsyncSession

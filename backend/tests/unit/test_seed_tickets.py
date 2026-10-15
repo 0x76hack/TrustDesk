@@ -19,14 +19,7 @@ class TestSeedTicketsGenerator:
         mock_empty_res.scalars.return_value.first.return_value = None
         mock_empty_res.scalars.return_value.all.return_value = []
 
-        mock_session.execute.side_effect = [
-            mock_agent_res,
-            mock_empty_res,
-            mock_empty_res,
-            mock_empty_res,
-            mock_empty_res,
-            mock_empty_res,
-        ] + [mock_empty_res] * 50
+        mock_session.execute.return_value = mock_empty_res
 
         mock_session.get.return_value = None
 

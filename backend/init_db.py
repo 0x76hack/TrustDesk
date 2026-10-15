@@ -1,4 +1,6 @@
 import asyncio
+import os
+import secrets
 import uuid
 from datetime import datetime, timezone, timedelta
 from sqlalchemy import text, select
@@ -10,6 +12,7 @@ from app.models.customer import Customer
 from app.models.order import Order, OrderItem
 from app.models.kb import KBDocument, KBChunk
 from app.models.tool import ToolDefinition
+from app.ai.embedding_utils import generate_dense_embedding
 
 async def init():
     async with engine.begin() as conn:
@@ -22,15 +25,15 @@ async def init():
         await conn.execute(text('ALTER TABLE tickets ADD COLUMN IF NOT EXISTS resolved_at TIMESTAMP WITH TIME ZONE'))
         await conn.execute(text('ALTER TABLE tickets ADD COLUMN IF NOT EXISTS notes VARCHAR(2000)'))
 
-        await conn.execute(text('''
-            CREATE TABLE IF NOT EXISTS ticket_notes (
-                id VARCHAR(36) PRIMARY KEY,
-                ticket_id VARCHAR(36) REFERENCES tickets(id) ON DELETE CASCADE,
-                author_id VARCHAR(36) REFERENCES users(id),
-                content TEXT NOT NULL,
-                created_at TIMESTAMP WITH TIME ZONE DEFAULT NOW()
-            )
-        '''))
+        await conn.execute(text(
+            "CREATE TABLE IF NOT EXISTS ticket_notes ("
+            "id VARCHAR(36) PRIMARY KEY, "
+            "ticket_id VARCHAR(36) REFERENCES tickets(id) ON DELETE CASCADE, "
+            "author_id VARCHAR(36) REFERENCES users(id), "
+            "content TEXT NOT NULL, "
+            "created_at TIMESTAMP WITH TIME ZONE DEFAULT NOW()"
+            ")"
+        ))
         await conn.execute(text('CREATE INDEX IF NOT EXISTS ix_ticket_notes_ticket_id_created_at ON ticket_notes(ticket_id, created_at)'))
 
         await conn.execute(text('ALTER TABLE users DROP CONSTRAINT IF EXISTS users_email_key'))
@@ -66,24 +69,24 @@ async def init():
         await conn.execute(text('ALTER TABLE audit_log ALTER COLUMN actor_id TYPE VARCHAR(100)'))
         await conn.execute(text('ALTER TABLE audit_log ALTER COLUMN resource_id TYPE VARCHAR(100)'))
 
-        await conn.execute(text('''
-            CREATE TABLE IF NOT EXISTS coupons (
-                id VARCHAR(36) PRIMARY KEY,
-                code VARCHAR(50) UNIQUE NOT NULL,
-                customer_id VARCHAR(36) NOT NULL REFERENCES customers(id),
-                original_order_id VARCHAR(36) REFERENCES orders(id),
-                ticket_id VARCHAR(36) REFERENCES tickets(id),
-                amount FLOAT NOT NULL,
-                currency VARCHAR(10) DEFAULT 'INR',
-                status VARCHAR(30) DEFAULT 'active',
-                idempotency_key VARCHAR(200) UNIQUE,
-                redeemed_order_id VARCHAR(36) REFERENCES orders(id),
-                redeemed_ticket_id VARCHAR(36) REFERENCES tickets(id),
-                redeemed_at TIMESTAMP WITH TIME ZONE,
-                expires_at TIMESTAMP WITH TIME ZONE NOT NULL,
-                created_at TIMESTAMP WITH TIME ZONE DEFAULT NOW()
-            )
-        '''))
+        await conn.execute(text(
+            "CREATE TABLE IF NOT EXISTS coupons ("
+            "id VARCHAR(36) PRIMARY KEY, "
+            "code VARCHAR(50) UNIQUE NOT NULL, "
+            "customer_id VARCHAR(36) NOT NULL REFERENCES customers(id), "
+            "original_order_id VARCHAR(36) REFERENCES orders(id), "
+            "ticket_id VARCHAR(36) REFERENCES tickets(id), "
+            "amount FLOAT NOT NULL, "
+            "currency VARCHAR(10) DEFAULT 'INR', "
+            "status VARCHAR(30) DEFAULT 'active', "
+            "idempotency_key VARCHAR(200) UNIQUE, "
+            "redeemed_order_id VARCHAR(36) REFERENCES orders(id), "
+            "redeemed_ticket_id VARCHAR(36) REFERENCES tickets(id), "
+            "redeemed_at TIMESTAMP WITH TIME ZONE, "
+            "expires_at TIMESTAMP WITH TIME ZONE NOT NULL, "
+            "created_at TIMESTAMP WITH TIME ZONE DEFAULT NOW()"
+            ")"
+        ))
         await conn.execute(text('CREATE INDEX IF NOT EXISTS ix_coupons_code ON coupons(code)'))
         await conn.execute(text('CREATE INDEX IF NOT EXISTS ix_coupons_customer_status ON coupons(customer_id, status)'))
 
@@ -92,7 +95,7 @@ async def init():
             "username": "admin",
             "name": "System Administrator",
             "email": "admin@trustdesk.local",
-            "password": "admin123!",
+            "password": os.getenv("INITIAL_ADMIN_PASSWORD") or secrets.token_urlsafe(16),
             "role": "admin",
             "mfa_setup_completed": False,
         },
@@ -100,7 +103,7 @@ async def init():
             "username": "ai_agent",
             "name": "TrustDesk AI Agent",
             "email": "ai.agent@trustdesk.local",
-            "password": "ai_system_internal_service_key!",
+            "password": os.getenv("INTERNAL_SERVICE_KEY") or secrets.token_urlsafe(24),
             "role": "agent",
             "mfa_setup_completed": True,
         },
@@ -151,7 +154,7 @@ async def init():
             "address": "Flat 402, Palm Breeze Apartments, 12th Main, Indiranagar, Bengaluru - 560038",
             "membership_tier": "Pro Tier Member",
             "total_orders": 42,
-            "password": "CustomerPass123!",
+            "password": os.getenv("DEFAULT_CUSTOMER_PASSWORD") or secrets.token_urlsafe(16),
             "is_active": True,
         }
 
@@ -394,17 +397,23 @@ async def init():
 
             chk_res = await session.execute(select(KBChunk).where(KBChunk.doc_id == k["doc_id"]))
             existing_chk = chk_res.scalars().first()
+            chunk_embedding = generate_dense_embedding(k["body"])
             if not existing_chk:
                 chunk_obj = KBChunk(
                     id=str(uuid.uuid4()),
                     doc_id=k["doc_id"],
                     chunk_seq=0,
                     content=k["body"],
+                    embedding=chunk_embedding,
                     metadata_json={"doc_id": k["doc_id"], "category": k["category"], "title": k["title"]},
                     version=1,
                 )
                 session.add(chunk_obj)
-                print(f"KB Chunk created: {k['doc_id']}-chunk-0")
+                print(f"KB Chunk created with vector embedding: {k['doc_id']}-chunk-0")
+            else:
+                existing_chk.content = k["body"]
+                existing_chk.embedding = chunk_embedding
+                existing_chk.metadata_json = {"doc_id": k["doc_id"], "category": k["category"], "title": k["title"]}
 
         tools = [
             {

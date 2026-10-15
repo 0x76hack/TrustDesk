@@ -7,17 +7,17 @@ from app.core.secrets import secrets_manager
 
 class Settings(BaseSettings):
     DATABASE_URL: str = Field(
-        default="postgresql+asyncpg://trustdesk:trustdesk_secret@localhost:5432/trustdesk",
+        default=os.getenv("DATABASE_URL", "postgresql+asyncpg://postgres@localhost:5432/trustdesk"),
         description="Async PostgreSQL connection string"
     )
 
     REDIS_URL: str = Field(
-        default="redis://localhost:6379/0",
+        default=os.getenv("REDIS_URL", "redis://localhost:6379/0"),
         description="Redis connection string for state, cache, and ARQ queue"
     )
 
     JWT_SECRET: str = Field(
-        default="change-me-to-a-long-random-string-in-production-at-least-32-bytes",
+        default=os.getenv("JWT_SECRET", "dev-insecure-jwt-secret-replace-in-production-min-32-bytes"),
         description="HMAC SHA-256 secret key for signing JWTs"
     )
     JWT_ALGORITHM: str = "HS256"
@@ -25,7 +25,7 @@ class Settings(BaseSettings):
     CORS_ORIGINS: str = "http://localhost:5173,http://127.0.0.1:5173,http://localhost:3000"
 
     CSRF_SECRET_KEY: str = Field(
-        default="trustdesk-csrf-secret-key-32-bytes-minimum-entropy",
+        default=os.getenv("CSRF_SECRET_KEY", "dev-insecure-csrf-token-replace-in-production-min-32-bytes"),
         description="Secret key for generating and verifying cryptographic CSRF tokens"
     )
     CSRF_COOKIE_NAME: str = "trustdesk_csrf_token"

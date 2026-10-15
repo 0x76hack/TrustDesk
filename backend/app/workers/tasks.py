@@ -400,6 +400,8 @@ async def action_task(ctx, run_id: str, ticket_id: str, tool_name: str, payload:
                 risk_result={"risk_level": ticket.risk_level or "low"},
                 db=db,
                 run_id=run_id,
+                tool_name=tool_name,
+                payload=payload,
             )
 
             latency_ms = int((time.time() - start_time) * 1000)

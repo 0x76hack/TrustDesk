@@ -4,14 +4,14 @@ import argparse
 from app.core.secrets import encrypt_secrets, SecretsManager
 
 DEFAULT_SECRETS = {
-    "DATABASE_URL": "postgresql+asyncpg://trustdesk:trustdesk_secret@postgres:5432/trustdesk",
-    "REDIS_URL": "redis://redis:6379/0",
-    "JWT_SECRET": "trustdesk-production-super-secret-key-replace-in-prod",
-    "OPENROUTER_API_KEY": "",
-    "SMTP_USER": "admin@trustdesk.local",
-    "SMTP_PASSWORD": "change-in-production",
-    "SMTP_FROM": "security@trustdesk.local",
-    "CSRF_SECRET_KEY": "trustdesk-csrf-secret-key-production-grade",
+    "DATABASE_URL": os.getenv("DATABASE_URL", "postgresql+asyncpg://postgres@localhost:5432/trustdesk"),
+    "REDIS_URL": os.getenv("REDIS_URL", "redis://localhost:6379/0"),
+    "JWT_SECRET": os.getenv("JWT_SECRET", "template-jwt-secret-replace-with-secure-key"),
+    "OPENROUTER_API_KEY": os.getenv("OPENROUTER_API_KEY", ""),
+    "SMTP_USER": os.getenv("SMTP_USER", "admin@trustdesk.local"),
+    "SMTP_PASSWORD": os.getenv("SMTP_PASSWORD", "template-smtp-password"),
+    "SMTP_FROM": os.getenv("SMTP_FROM", "security@trustdesk.local"),
+    "CSRF_SECRET_KEY": os.getenv("CSRF_SECRET_KEY", "template-csrf-secret-key-32-bytes"),
 }
 
 

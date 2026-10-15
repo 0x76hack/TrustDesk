@@ -21,6 +21,8 @@ async def recommend_action(
     db: AsyncSession,
     run_id: Optional[str] = None,
     proposed_by_id: Optional[str] = None,
+    tool_name: Optional[str] = None,
+    payload: Optional[Dict[str, Any]] = None,
 ) -> Optional[ToolAction]:
     if ticket.status in ["resolved", "closed"]:
         raise HTTPException(
@@ -29,16 +31,15 @@ async def recommend_action(
         )
 
     category = triage_result.get("category", "general")
-    tool_name = None
-
-    if category == "refund":
-        tool_name = "start_refund_review"
-    elif category == "warranty":
-        tool_name = "create_replacement_order"
-    elif category == "shipping":
-        tool_name = "track_shipment"
-    elif category == "billing":
-        tool_name = "verify_charge"
+    if not tool_name:
+        if category == "refund":
+            tool_name = "start_refund_review"
+        elif category == "warranty":
+            tool_name = "create_replacement_order"
+        elif category == "shipping":
+            tool_name = "track_shipment"
+        elif category == "billing":
+            tool_name = "verify_charge"
 
     if not tool_name:
         return None
@@ -73,10 +74,12 @@ async def recommend_action(
                     detail=f"Cumulative refund limit exceeded: order total is ₹{order.total:.2f}, prior refunds total ₹{total_prior_refunds:.2f}.",
                 )
 
+    sensitive_tools = {"start_refund_review", "create_replacement_order", "issue_refund", "cancel_order"}
+    is_sensitive = tool_name in sensitive_tools
+
     result = await db.execute(select(ToolDefinition).where(ToolDefinition.name == tool_name))
     tool_def = result.scalar_one_or_none()
     if not tool_def:
-        is_sensitive = tool_name in ["start_refund_review", "create_replacement_order", "issue_refund"]
         tool_def = ToolDefinition(
             id=str(uuid.uuid4()),
             name=tool_name,
@@ -87,9 +90,17 @@ async def recommend_action(
         )
         db.add(tool_def)
         await db.flush()
+    else:
+        if is_sensitive and not tool_def.is_sensitive:
+            tool_def.is_sensitive = True
+            tool_def.is_read_only = False
 
     risk_level = risk_result.get("risk_level", "low")
-    action_status = "pending_approval" if (tool_def.is_sensitive or risk_level in ["high", "critical"]) else "executed"
+    action_status = "pending_approval" if (is_sensitive or tool_def.is_sensitive or risk_level in ["high", "critical"]) else "executed"
+
+    action_payload = {"category": category, "subject": ticket.subject or ""}
+    if payload and isinstance(payload, dict):
+        action_payload.update(payload)
 
     action_id = str(uuid.uuid4())
     action = ToolAction(
@@ -97,7 +108,7 @@ async def recommend_action(
         ticket_id=ticket.id,
         run_id=run_id,
         tool_id=tool_def.id,
-        payload={"category": category, "subject": ticket.subject or ""},
+        payload=action_payload,
         risk_level=risk_level,
         status=action_status,
         idempotency_key=idempotency_key,
@@ -119,7 +130,16 @@ async def execute_action(action: ToolAction, db: AsyncSession) -> Dict[str, Any]
     tool_name = tool.name if tool else "unknown_tool"
     payload = action.payload or {}
 
-    if tool_name == "issue_refund":
+    sensitive_tools = {"start_refund_review", "create_replacement_order", "issue_refund", "cancel_order"}
+    is_sensitive = (tool and tool.is_sensitive) or tool_name in sensitive_tools
+
+    if is_sensitive and action.status != "approved":
+        raise HTTPException(
+            status_code=status.HTTP_403_FORBIDDEN,
+            detail=f"Sensitive action '{tool_name}' requires supervisor approval before execution.",
+        )
+
+    if tool_name in ["issue_refund", "start_refund_review"]:
         from app.services.refund_service import issue_refund_coupon
         ticket = await db.get(Ticket, action.ticket_id)
         amount_raw = payload.get("amount")
